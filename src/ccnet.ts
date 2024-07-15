@@ -113,8 +113,18 @@ export class CCNET implements Disposable {
     return this.exec(() => this.serialPort.sendCommandWithAwaitingData(requestDataFor('POLL')))
   }
 
-  reset (): Promise<void> {
-    return this.exec(() => this.serialPort.sendCommand(requestDataFor('RESET')))
+  async reset(): Promise<void> {
+    try {
+      this.debug('Reseting device...')
+      await this.exec(() => this.serialPort.sendCommand(requestDataFor('RESET')))
+    } catch (error: any) {
+      console.log(error);
+
+      throw new Error('Error while reseting device: ' + error.message)
+    }
+    finally {
+      this.debug('Device reseted!')
+    }
   }
 
   async exec<T> (fn : () => Promise<T>): Promise<T> {
