@@ -73,8 +73,8 @@ export class CCNET implements Disposable {
       this.isConnect = true
       this.debug('Reseting device...')
       await this.reset()
-      this.debug('Waiting for device to reboot..., is busy: ' + this.busy + ' is connected: ' + this.isConnect)
-      await this.waitForReboot()
+      // this.debug('Waiting for device to reboot..., is busy: ' + this.busy + ' is connected: ' + this.isConnect)
+      // await this.waitForReboot()
       this.debug('Device reseted!')
       const meta = await this.identify()
       this.debug('Device identified! Part: ' + meta.Part + ' Serial: ' + meta.Serial + ' Asset: ' + meta.Asset)
