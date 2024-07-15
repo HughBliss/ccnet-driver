@@ -9,5 +9,5 @@ import { CCNET, DEVICE_TYPE } from "../src"
         true
     )
 
-    const meta = await ccnet.identify()
+    const meta = await ccnet.connect()
 })()
