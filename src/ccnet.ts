@@ -1,5 +1,6 @@
 import { requestDataFor } from './commands'
 import { DEVICE_TYPE } from './devicesTypes'
+import { DeviceBusyError } from './errors'
 import { SerialPortIO } from './serialPortWrapper'
 
 type DeviceMeta = {
@@ -102,7 +103,8 @@ export class CCNET implements Disposable {
             clearInterval(timer)
             resolve()
           }
-        }).catch((error) => {
+        }).catch((error: Error) => {
+          if (error instanceof DeviceBusyError) return
           clearInterval(timer)
           reject(error)
         })
@@ -130,7 +132,7 @@ export class CCNET implements Disposable {
 
   async exec<T> (fn : () => Promise<T>): Promise<T> {
     if (!this.isConnect) throw new Error('Device is not connected!')
-    if (this.busy) throw new Error('Device is busy')
+    if (this.busy) throw new DeviceBusyError('Device is busy')
     this.busy = true
     let response : T | undefined
     try {
