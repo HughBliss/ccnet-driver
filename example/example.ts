@@ -4,7 +4,7 @@ import { CCNET, DEVICE_TYPE } from "../src"
 
 (async () => {
     using ccnet = new CCNET(
-        '/dev/tty.usbserial',
+        'COM2',
         DEVICE_TYPE.BILL_VALIDATOR,
         true
     )
