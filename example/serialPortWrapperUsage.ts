@@ -22,7 +22,7 @@ import { requestDataFor, SerialPortIO } from '../src'
     await wrapperInstance.sendCommand(requestDataFor('RESET', Buffer.from('\r\n')))
 
     for (; ;) {
-      await wrapperInstance.sendCommand(requestDataFor('POLL'))
+      await wrapperInstance.sendCommand(requestDataFor('POLL', Buffer.from('\r\n')))
       await new Promise((resolve) => setTimeout(resolve, 1000))
     }
   } catch (error) {
