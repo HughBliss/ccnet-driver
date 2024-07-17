@@ -1,32 +1,32 @@
 import { hex2bin } from './helpers'
 
 export enum COMMAND_HEX {
-    RESET = 0x30,
-    GET_STATUS = 0x31,
-    SET_SECURITY = 0x32,
-    POLL = 0x33,
-    STACK = 0x35,
-    RETURN = 0x36,
-    IDENTIFICATION = 0x37,
-    HOLD = 0x38,
-    SET_BARCODE_PARAMETERS = 0x39,
-    EXTRACT_BARCODE_DATA = 0x3A,
-    GET_BILL_TABLE = 0x41,
-    DOWNLOAD = 0x50,
-    GET_CRC32_OF_THE_CODE = 0x51,
-    REQUEST_STATISTICS = 0x60,
-    ENABLE_BILL_TYPES = 0x34
+  RESET = 0x30,
+  GET_STATUS = 0x31,
+  SET_SECURITY = 0x32,
+  POLL = 0x33,
+  STACK = 0x35,
+  RETURN = 0x36,
+  IDENTIFICATION = 0x37,
+  HOLD = 0x38,
+  SET_BARCODE_PARAMETERS = 0x39,
+  EXTRACT_BARCODE_DATA = 0x3A,
+  GET_BILL_TABLE = 0x41,
+  DOWNLOAD = 0x50,
+  GET_CRC32_OF_THE_CODE = 0x51,
+  REQUEST_STATISTICS = 0x60,
+  ENABLE_BILL_TYPES = 0x34
 }
 
-export type COMMAND = keyof typeof COMMAND_HEX;
+export type COMMAND = keyof typeof COMMAND_HEX
 
-export type CommandIO = {
-    request: (data: Buffer | undefined) => Buffer
-    response: (data: Buffer) => any
+export interface CommandIO {
+  request: (data: Buffer | undefined) => Buffer
+  response: (data: Buffer) => unknown
 }
 
 export const requestDataFor = (commandName: COMMAND, data?: Buffer): Buffer => {
-  console.log('requestDataFor', commandName, data);
+  console.log('requestDataFor', commandName, data)
   return Buffer.from([COMMAND_HEX[commandName], ...(data ?? [])])
 }
 
@@ -54,7 +54,7 @@ export const commands: { [key in COMMAND]: CommandIO } = {
   RESET: {
     request: () => Buffer.from([COMMAND_HEX.RESET]),
 
-    response: (data : Uint8Array) => {
+    response: (data: Uint8Array) => {
       switch (data[0]) {
         case 0:
           return 'Done'
@@ -68,7 +68,7 @@ export const commands: { [key in COMMAND]: CommandIO } = {
 
   GET_STATUS: {
     request: () => Buffer.from([COMMAND_HEX.GET_STATUS]),
-    response: function (data : Buffer) {
+    response: function (data: Buffer) {
       return {
         enabledBills: hex2bin(data.subarray(0, 3)),
         highSecurity: hex2bin(data.subarray(3, 6))

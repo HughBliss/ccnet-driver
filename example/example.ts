@@ -1,13 +1,17 @@
-import { CCNET, DEVICE_TYPE } from "../src"
+import { CCNET, DEVICE_TYPE } from '../src'
 
-
-
-(async () => {
+(
+  async () => {
     using ccnet = new CCNET(
-        'COM2',
-        DEVICE_TYPE.BILL_VALIDATOR,
-        true
+      'COM2',
+      DEVICE_TYPE.BILL_VALIDATOR,
+      true
     )
 
-    const meta = await ccnet.connect()
-})()
+    await ccnet.connect()
+
+    const meta = await ccnet.identify()
+
+    console.log(meta)
+  }
+)().then(() => { console.log('Done') }).catch(console.error)

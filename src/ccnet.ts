@@ -3,23 +3,23 @@ import { DEVICE_TYPE } from './devicesTypes'
 import { DeviceBusyError } from './errors'
 import { SerialPortIO } from './serialPortWrapper'
 
-type DeviceMeta = {
+interface DeviceMeta {
   Part: string
   Serial: string
   Asset: string
 }
 
 export class CCNET implements Disposable {
-  private sync: number
-  private device: DEVICE_TYPE
+  private readonly sync: number
+  private readonly device: DEVICE_TYPE
   private isConnect: boolean
   private busy: boolean
-  private globalTimer: NodeJS.Timeout | false
-  private globalListener: ((data: Buffer) => void) | false
-  private serialPort: SerialPortIO
-  private debugMode: boolean
+  private readonly globalTimer: NodeJS.Timeout | false
+  private readonly globalListener: ((data: Buffer) => void) | false
+  private readonly serialPort: SerialPortIO
+  private readonly debugMode: boolean
 
-  constructor (path: string, deviceType : DEVICE_TYPE, isDebugMode : boolean = false) {
+  constructor (path: string, deviceType: DEVICE_TYPE, isDebugMode: boolean = false) {
     this.sync = 0x02 // Constant
     this.device = deviceType // Type of device
     this.isConnect = false // Connection device status
@@ -54,11 +54,11 @@ export class CCNET implements Disposable {
     })
   }
 
-  [Symbol.dispose] (): void {
-    this.serialPort.close()
+  async [Symbol.dispose] (): Promise<void> {
+    await this.serialPort.close()
   }
 
-  debug (message : string) {
+  debug (message: string): void {
     if (this.debugMode) {
       // eslint-disable-next-line no-console
       console.log(message)
@@ -83,20 +83,20 @@ export class CCNET implements Disposable {
         this.debug('error while connecting to device: ' + error.message)
         throw new Error('error while connecting to device: ' + error.message)
       }
-      this.debug(`${error}`)
+      this.debug(JSON.stringify(error))
     }
   }
 
   async identify (): Promise<DeviceMeta> {
-    const buffer = await this.exec(() => this.serialPort.sendCommandWithAwaitingData(requestDataFor('IDENTIFICATION')))
+    const buffer = await this.exec(async () => await this.serialPort.sendCommandWithAwaitingData(requestDataFor('IDENTIFICATION')))
     const part = buffer.subarray(0.15).toString().trim()
     const serial = buffer.subarray(15, 27).toString().trim()
     const asset = buffer.subarray(27, 34).toString().trim()
     return { Part: part, Serial: serial, Asset: asset }
   }
 
-  waitForReboot (): Promise<void> {
-    return new Promise((resolve, reject) => {
+  async waitForReboot (): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
       const timer = setInterval(() => {
         this.poll().then((data) => {
           if (data.toString('hex') === '19') {
@@ -112,29 +112,24 @@ export class CCNET implements Disposable {
     })
   }
 
-  poll (): Promise<Buffer> {
-    return this.exec(() => this.serialPort.sendCommandWithAwaitingData(requestDataFor('POLL')))
+  async poll (): Promise<Buffer> {
+    return await this.exec(async () => await this.serialPort.sendCommandWithAwaitingData(requestDataFor('POLL')))
   }
 
-  async reset(): Promise<void> {
+  async reset (): Promise<void> {
     try {
       this.debug('Reseting device...')
-      await this.exec(() => this.serialPort.sendCommand(requestDataFor('RESET')))
-    } catch (error: any) {
-      console.log(error);
-
-      throw new Error('Error while reseting device: ' + error.message)
-    }
-    finally {
+      await this.exec(async () => { await this.serialPort.sendCommand(requestDataFor('RESET')) })
+    } finally {
       this.debug('Device reseted!')
     }
   }
 
-  async exec<T> (fn : () => Promise<T>): Promise<T> {
+  async exec<T> (fn: () => Promise<T>): Promise<T> {
     if (!this.isConnect) throw new Error('Device is not connected!')
     if (this.busy) throw new DeviceBusyError('Device is busy')
     this.busy = true
-    let response : T | undefined
+    let response: T | undefined
     try {
       response = await fn()
     } finally {

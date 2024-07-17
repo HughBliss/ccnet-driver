@@ -4,16 +4,26 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "example": "ts-node example/example.ts"
+    "example": "ts-node example/serialPortWrapperUsage.ts",
+    "lint": "eslint ./src --fix"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@serialport/bindings-cpp": "^12.0.1",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.5.3"
+    "@typescript-eslint/eslint-plugin": "^7.16.1",
+    "@typescript-eslint/utils": "^7.16.1",
+    "eslint": "^8.56.0",
+    "eslint-config-love": "^47.0.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-n": "^15.7.0",
+    "eslint-plugin-promise": "^6.4.0",
+    "globals": "^15.8.0",
+    "typescript-eslint": "^7.16.1"
   },
   "dependencies": {
-    "serialport": "^12.0.0"
+    "@serialport/bindings-cpp": "^12.0.1",
+    "serialport": "^12.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
   }
 }
