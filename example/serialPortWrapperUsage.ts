@@ -13,14 +13,12 @@ import { requestDataFor, SerialPortIO } from '../src'
   try {
     await wrapperInstance.open()
 
-    wrapperInstance.parser.on('data', (data) => {
-      console.log(data)
-    })
+    const responce = await wrapperInstance.sendCommandWithAwaitingData(requestDataFor('GET_STATUS', Buffer.from('\n')))
 
-    await wrapperInstance.sendCommandWithAwaitingData(requestDataFor('RESET'))
+    console.log(responce.toString())
 
     for (; ;) {
-      await wrapperInstance.sendCommandWithAwaitingData(requestDataFor('POLL'))
+      // await wrapperInstance.sendCommandWithAwaitingData(requestDataFor('POLL'))
       await new Promise((resolve) => setTimeout(resolve, 1000))
     }
   } catch (error) {

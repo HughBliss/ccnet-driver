@@ -6,7 +6,7 @@ export class SerialPortIO implements Disposable {
   parser: ReadlineParser
   constructor (options: SerialPortOpenOptions<AutoDetectTypes>) {
     this.serialPort = new SerialPort(options)
-    this.parser = new ReadlineParser({ delimiter: '\r\n' })
+    this.parser = new ReadlineParser({ })
     this.serialPort.pipe(this.parser)
   }
 
@@ -27,19 +27,17 @@ export class SerialPortIO implements Disposable {
         if (error != null) {
           reject(error)
         }
+
+        this.parser.once('data', (data) => {
+          if (data instanceof Buffer) {
+            resolve(data)
+          }
+          if (typeof data === 'string') {
+            resolve(Buffer.from(data))
+          }
+          reject(new Error('Invalid data type'))
+        })
       })
-
-      resolve(Buffer.from(''))
-
-      // this.parser.on('data', (data) => {
-      //   if (data instanceof Buffer) {
-      //     resolve(data)
-      //   }
-      //   if (typeof data === 'string') {
-      //     resolve(Buffer.from(data))
-      //   }
-      //   reject(new Error('Invalid data type'))
-      // })
     })
   }
 
