@@ -13,7 +13,9 @@ import { requestDataFor, SerialPortIO } from '../src'
   try {
     await wrapperInstance.open()
 
-    const responce = await wrapperInstance.sendCommandWithAwaitingData(requestDataFor('GET_STATUS', Buffer.from('\n')))
+    console.log('sending RESET command')
+
+    const responce = await wrapperInstance.sendCommandWithAwaitingData(requestDataFor('RESET', Buffer.from('\r\n')))
 
     console.log(responce.toString())
 

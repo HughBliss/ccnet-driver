@@ -6,7 +6,7 @@ export class SerialPortIO implements Disposable {
   parser: ReadlineParser
   constructor (options: SerialPortOpenOptions<AutoDetectTypes>) {
     this.serialPort = new SerialPort(options)
-    this.parser = new ReadlineParser({ })
+    this.parser = new ReadlineParser({ delimiter: '\r\n' })
     this.serialPort.pipe(this.parser)
   }
 
@@ -22,11 +22,19 @@ export class SerialPortIO implements Disposable {
   }
 
   async sendCommandWithAwaitingData (req: Buffer): Promise<Buffer> {
+    console.log('start sending command', req)
+
     return await new Promise((resolve, reject) => {
       this.serialPort.write(req, (error) => {
+        console.log('command sent')
+
         if (error != null) {
+          console.log('error', error)
+
           reject(error)
         }
+
+        console.log('waiting for data')
 
         this.parser.once('data', (data) => {
           if (data instanceof Buffer) {
