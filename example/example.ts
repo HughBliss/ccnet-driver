@@ -2,7 +2,7 @@ import { CCNET, DEVICE_TYPE } from '../src'
 
 (async () => {
   using ccnet = new CCNET({
-    path: 'COM2',
+    path: '/dev/ttys021',
     deviceType: DEVICE_TYPE.BILL_VALIDATOR,
     isDebugMode: true,
     timeout: 10000

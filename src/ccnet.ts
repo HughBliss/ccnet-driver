@@ -157,26 +157,12 @@ export class CCNET implements Disposable {
   async exec (request: Buffer): Promise<Buffer | undefined> {
     if (!this.isConnect) throw new Error('Device is not connected!')
     if (this.busy) throw new DeviceBusyError('Device is busy')
-
     this.debug('Sending request: ' + request.toString('hex'))
-
-    request = Buffer.from([
-      this.sync,
-      this.device,
-      request.length + 5,
-      ...request
-    ])
-
-    request = Buffer.from([
-      ...request,
-      ...getCRC16(request)
-    ])
-
+    request = Buffer.from([this.sync, this.device, request.length + 5, ...request])
+    request = Buffer.from([...request, ...getCRC16(request)])
     this.debug('Sending request with CRC: ' + request.toString('hex'))
-
     this.debug('device is busy now')
     this.busy = true
-
     try {
       await new Promise<void>((resolve, reject) => {
         this.serialPort.write(request, (error) => {
@@ -187,32 +173,24 @@ export class CCNET implements Disposable {
           resolve()
         })
       })
-
       this.debug('Request sent')
-
       this.debug('Waiting for response...')
-
       const response = await new Promise<Buffer>((resolve, reject) => {
         let answer: Buffer | undefined
         let length = 0
         let timer: NodeJS.Timeout | null = null
         const listenToAnswer = (data: Buffer): void => {
           this.debug('Data received: ' + data.toString('hex'))
-
           if (answer instanceof Buffer) {
             answer = Buffer.from([...answer, ...data])
           } else {
             answer = data
           }
-
           this.debug('Answer: ' + answer.toString('hex'))
-
           if (answer.length >= 3 && length === 0) {
             length = answer[2]
           }
-
           this.debug('Answer length: ' + length)
-
           if (length === answer.length) {
             this.debug('Answer length reached')
             this.answerParser.removeListener('data', listenToAnswer)
@@ -230,13 +208,9 @@ export class CCNET implements Disposable {
           reject(new Error('Timeout reached'))
         }, this.timeout)
       })
-
       this.debug('Response received: ' + response.toString('hex'))
-
       const validatedAnswer = await this.checkAnswerIsValid(response)
-
       this.debug('Response validated: ' + validatedAnswer.toString('hex'))
-
       return validatedAnswer
     } finally {
       this.debug('Device is not busy anymore')
@@ -248,25 +222,15 @@ export class CCNET implements Disposable {
     if (answer[0] !== this.sync || answer[1] !== this.device) {
       throw new Error('Wrong response target')
     }
-    // Check CRC
     const ln = answer.length
     const checkCRC = answer.subarray(ln - 2, ln)
     const responseCRCslice = answer.subarray(0, ln - 2)
     const data = answer.subarray(3, ln - 2)
-
     if (checkCRC.compare(getCRC16(responseCRCslice)) !== 0) {
       throw new Error('Wrong response command hash')
     } else {
-      let ok = Buffer.from([
-        this.sync,
-        this.device,
-        0x00,
-        0x06
-      ])
-      ok = Buffer.from([
-        ...ok,
-        ...getCRC16(ok)
-      ])
+      let ok = Buffer.from([this.sync, this.device, 0x06, 0x00])
+      ok = Buffer.from([...ok, ...getCRC16(ok)])
 
       await new Promise<void>((resolve, reject) => {
         this.serialPort.write(ok, (error) => {
