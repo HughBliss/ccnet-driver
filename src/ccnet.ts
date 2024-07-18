@@ -1,7 +1,8 @@
+import { ByteLengthParser, SerialPort } from 'serialport'
 import { requestDataFor } from './commands'
 import { DEVICE_TYPE } from './devicesTypes'
 import { DeviceBusyError } from './errors'
-import { SerialPortIO } from './serialPortWrapper'
+import { getCRC16 } from './helpers'
 
 interface DeviceMeta {
   Part: string
@@ -10,24 +11,26 @@ interface DeviceMeta {
 }
 
 export class CCNET implements Disposable {
-  private readonly sync: number
+  private readonly sync: number = 0x02
   private readonly device: DEVICE_TYPE
   private isConnect: boolean
   private busy: boolean
-  private readonly globalTimer: NodeJS.Timeout | false
-  private readonly globalListener: ((data: Buffer) => void) | false
-  private readonly serialPort: SerialPortIO
+  private readonly serialPort: SerialPort
   private readonly debugMode: boolean
+  private readonly answerParser: ByteLengthParser
+  private readonly timeout: number
 
-  constructor (path: string, deviceType: DEVICE_TYPE, isDebugMode: boolean = false) {
-    this.sync = 0x02 // Constant
+  constructor ({ path, deviceType, timeout, isDebugMode = false }: {
+    path: string
+    deviceType: DEVICE_TYPE
+    isDebugMode?: boolean
+    timeout: number
+  }) {
     this.device = deviceType // Type of device
     this.isConnect = false // Connection device status
     this.busy = false // Status of device
     this.debugMode = isDebugMode || false // Debug mode,
-    this.globalTimer = false
-    this.globalListener = false
-
+    this.timeout = timeout // Timeout for waiting response from device
     this.debug('Getting device type...')
 
     switch (this.device) {
@@ -44,7 +47,7 @@ export class CCNET implements Disposable {
         throw new Error('Unknown device type: ' + deviceType)
     }
 
-    this.serialPort = new SerialPortIO({
+    this.serialPort = new SerialPort({
       path,
       baudRate: 9600,
       parity: 'none',
@@ -52,32 +55,62 @@ export class CCNET implements Disposable {
       dataBits: 8,
       stopBits: 1
     })
+
+    this.answerParser = this.serialPort.pipe(
+      new ByteLengthParser({
+        length: 1
+      })
+    )
   }
 
   async [Symbol.dispose] (): Promise<void> {
-    await this.serialPort.close()
+    this.debug('Disconnecting from device...')
+    await this.serialPortClose()
   }
 
   debug (message: string): void {
     if (this.debugMode) {
-      // eslint-disable-next-line no-console
       console.log(message)
     }
+  }
+
+  async serialPortOpen (): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      this.serialPort.open((error) => {
+        if (error instanceof Error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  async serialPortClose (): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      this.serialPort.close((error) => {
+        if (error instanceof Error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
   }
 
   async connect (): Promise<void> {
     try {
       this.debug('Connecting to device...')
-      await this.serialPort.open()
+      await this.serialPortOpen()
       this.debug('Connected!')
       this.isConnect = true
       this.debug('Reseting device...')
       await this.reset()
       // this.debug('Waiting for device to reboot..., is busy: ' + this.busy + ' is connected: ' + this.isConnect)
       // await this.waitForReboot()
-      this.debug('Device reseted!')
-      const meta = await this.identify()
-      this.debug('Device identified! Part: ' + meta.Part + ' Serial: ' + meta.Serial + ' Asset: ' + meta.Asset)
+      // this.debug('Device reseted!')
+      // const meta = await this.identify()
+      // this.debug('Device identified! Part: ' + meta.Part + ' Serial: ' + meta.Serial + ' Asset: ' + meta.Asset)
     } catch (error) {
       if (error instanceof Error) {
         this.debug('error while connecting to device: ' + error.message)
@@ -87,56 +120,178 @@ export class CCNET implements Disposable {
     }
   }
 
-  async identify (): Promise<DeviceMeta> {
-    const buffer = await this.exec(async () => await this.serialPort.sendCommandWithAwaitingData(requestDataFor('IDENTIFICATION')))
+  async identify (): Promise<DeviceMeta > {
+    const buffer = await this.exec(requestDataFor('IDENTIFICATION'))
+    if (!(buffer instanceof Buffer)) throw new Error('error while identifying device')
     const part = buffer.subarray(0.15).toString().trim()
     const serial = buffer.subarray(15, 27).toString().trim()
     const asset = buffer.subarray(27, 34).toString().trim()
     return { Part: part, Serial: serial, Asset: asset }
   }
 
-  async waitForReboot (): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setInterval(() => {
-        this.poll().then((data) => {
-          if (data.toString('hex') === '19') {
-            clearInterval(timer)
-            resolve()
-          }
-        }).catch((error: Error) => {
-          if (error instanceof DeviceBusyError) return
-          clearInterval(timer)
-          reject(error)
-        })
-      }, 100)
-    })
-  }
+  // async waitForReboot (): Promise<void> {
+  //   await new Promise<void>((resolve, reject) => {
+  //     const timer = setInterval(() => {
+  //       this.poll().then((data) => {
+  //         if (data.toString('hex') === '19') {
+  //           clearInterval(timer)
+  //           resolve()
+  //         }
+  //       }).catch((error: Error) => {
+  //         if (error instanceof DeviceBusyError) return
+  //         clearInterval(timer)
+  //         reject(error)
+  //       })
+  //     }, 100)
+  //   })
+  // }
 
-  async poll (): Promise<Buffer> {
-    return await this.exec(async () => await this.serialPort.sendCommandWithAwaitingData(requestDataFor('POLL')))
-  }
+  // async poll (): Promise<Buffer> {
+  //   return await this.exec(async () => await this.serialPort.sendCommandWithAwaitingData(requestDataFor('POLL')))
+  // }
 
   async reset (): Promise<void> {
+    await this.exec(requestDataFor('RESET'))
+  }
+
+  async exec (request: Buffer): Promise<Buffer | undefined> {
+    if (!this.isConnect) throw new Error('Device is not connected!')
+    if (this.busy) throw new DeviceBusyError('Device is busy')
+
+    this.debug('Sending request: ' + request.toString('hex'))
+
+    request = Buffer.from([
+      this.sync,
+      this.device,
+      request.length + 5,
+      ...request
+    ])
+
+    request = Buffer.from([
+      ...request,
+      ...getCRC16(request)
+    ])
+
+    this.debug('Sending request with CRC: ' + request.toString('hex'))
+
+    this.debug('device is busy now')
+    this.busy = true
+
     try {
-      this.debug('Reseting device...')
-      await this.exec(async () => { await this.serialPort.sendCommand(requestDataFor('RESET')) })
+      await new Promise<void>((resolve, reject) => {
+        this.serialPort.write(request, (error) => {
+          if (error instanceof Error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+
+      this.debug('Request sent')
+
+      this.debug('Waiting for response...')
+
+      const response = await new Promise<Buffer>((resolve, reject) => {
+        let answer: Buffer | undefined
+        let length = 0
+        let timer: NodeJS.Timeout | null = null
+        const listenToAnswer = (data: Buffer): void => {
+          this.debug('Data received: ' + data.toString('hex'))
+
+          if (answer instanceof Buffer) {
+            answer = Buffer.from([...answer, ...data])
+          } else {
+            answer = data
+          }
+
+          this.debug('Answer: ' + answer.toString('hex'))
+
+          if (answer.length >= 3 && length === 0) {
+            length = answer[2]
+          }
+
+          this.debug('Answer length: ' + length)
+
+          if (length === answer.length) {
+            this.debug('Answer length reached')
+            this.answerParser.removeListener('data', listenToAnswer)
+            if (timer !== null) {
+              clearTimeout(timer)
+            }
+            this.debug('Resolving answer: ' + answer.toString('hex'))
+            resolve(answer)
+          }
+        }
+        this.answerParser.on('data', listenToAnswer)
+        timer = setTimeout(() => {
+          this.debug('Timeout reached')
+          this.answerParser.removeListener('data', listenToAnswer)
+          reject(new Error('Timeout reached'))
+        }, this.timeout)
+      })
+
+      this.debug('Response received: ' + response.toString('hex'))
+
+      const validatedAnswer = await this.checkAnswerIsValid(response)
+
+      this.debug('Response validated: ' + validatedAnswer.toString('hex'))
+
+      return validatedAnswer
     } finally {
-      this.debug('Device reseted!')
+      this.debug('Device is not busy anymore')
+      this.busy = false
     }
   }
 
-  async exec<T> (fn: () => Promise<T>): Promise<T> {
-    if (!this.isConnect) throw new Error('Device is not connected!')
-    if (this.busy) throw new DeviceBusyError('Device is busy')
-    this.busy = true
-    let response: T | undefined
-    try {
-      response = await fn()
-    } finally {
-      this.busy = false
+  async checkAnswerIsValid (answer: Buffer): Promise<Buffer> {
+    if (answer[0] !== this.sync || answer[1] !== this.device) {
+      throw new Error('Wrong response target')
     }
-    return response
+    // Check CRC
+    const ln = answer.length
+    const checkCRC = answer.subarray(ln - 2, ln)
+    const responseCRCslice = answer.subarray(0, ln - 2)
+    const data = answer.subarray(3, ln - 2)
+
+    if (checkCRC.compare(getCRC16(responseCRCslice)) !== 0) {
+      throw new Error('Wrong response command hash')
+    } else {
+      let ok = Buffer.from([
+        this.sync,
+        this.device,
+        0x00,
+        0x06
+      ])
+      ok = Buffer.from([
+        ...ok,
+        ...getCRC16(ok)
+      ])
+
+      await new Promise<void>((resolve, reject) => {
+        this.serialPort.write(ok, (error) => {
+          if (error instanceof Error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+    }
+
+    return data
   }
+
+  // handleResponse (response: Buffer): void {
+  //   this.debug(response.toString())
+  //   this.debug('Sync: ' + this.sync)
+  //   this.debug('Device: ' + this.device.toString(16))
+
+  //   if (response[0] !== this.sync || response[1] !== this.device) {
+  //     throw new Error('Wrong response target')
+  //   }
+
+  // }
 
   // /**
   //    * Connect to device

@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "example": "ts-node example/serialPortWrapperUsage.ts",
+    "example": "ts-node example/example.ts",
     "lint": "eslint ./src --fix"
   },
   "author": "",

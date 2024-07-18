@@ -8,9 +8,10 @@ def handle_input(master_fd):
     while True:
         data = os.read(master_fd, 1024)
         if data:
-            print(f"Received: {data.decode()}")
-            os.write(master_fd, b"Echo: " + data)
+            # print hex
+            print("received: "+"".join(f"{b:02x} " for b in data))
             time.sleep(1)  # Эмулируем задержку
+            os.write(master_fd,  data)
 
 
 def main():

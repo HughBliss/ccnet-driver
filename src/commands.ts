@@ -27,7 +27,6 @@ export interface CommandIO {
 
 export const requestDataFor = (commandName: COMMAND, data?: Buffer): Buffer => {
   const b = Buffer.from([COMMAND_HEX[commandName], ...(data ?? [])])
-  console.log('Request data:', b)
   return b
 }
 
