@@ -85,14 +85,21 @@ export class CCNET implements Disposable {
     }
   }
 
-  async escrow (billsToEnable: number[] = []): Promise<number> {
+  async escrow ({
+    billsToEnable = [],
+    signal
+  }: {
+    billsToEnable?: number[]
+    signal?: AbortSignal
+  } = {}): Promise<number> {
     if (billsToEnable.length === 0) {
       billsToEnable = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
     }
     const billTable = await this.exec(requestDataFor('GET_BILL_TABLE'))
     if (!(billTable instanceof Buffer)) throw new Error('error while getting bill table')
+    this.debug(billTable.toString())
     await this.exec(requestDataFor('ENABLE_BILL_TYPES', Buffer.from(billsToEnable)))
-    const [billPosition] = await this.waitFor(STATUS.ESCROW_POSITION, 100, 100)
+    const [billPosition] = await this.waitFor(STATUS.ESCROW_POSITION, { signal, attempts: 500, frequency: 200 }) // 500 attempts * 200ms = 100s = 1m40s
     return billTable[billPosition]
   }
 
@@ -106,37 +113,38 @@ export class CCNET implements Disposable {
   }
 
   async waitForReboot (): Promise<void> {
-    // for (let i = 0; i < 100; ++i) {
-    //   const result = await this.exec(requestDataFor('POLL'))
-    //   if (!(result instanceof Buffer)) throw new Error('Unexpected response')
-    //   switch (result[0]) {
-    //     case STATUS.UNIT_DISABLED:
-    //       this.debug('Device rebooted')
-    //       return
-    //     case STATUS.INITIALIZE:
-    //       this.debug('Device is initializing')
-    //       break
-    //     default:
-    //       this.debug('Unexpected status: ' + result[0].toString(16))
-    //       break
-    //   }
-    //   await new Promise<void>((resolve) => setTimeout(resolve, 500))
-    // }
-    // throw new Error('Device did not reboot')
-
     await this.waitFor(STATUS.UNIT_DISABLED)
   }
 
-  async waitFor (status: STATUS, attempts = 100, frequency = 500): Promise<Buffer> {
-    for (let i = 0; i < attempts; ++i) {
-      const result = await this.exec(requestDataFor('POLL'))
-      if (!(result instanceof Buffer)) throw new Error('Unexpected response')
-      if (result[0] === status) {
-        return result.subarray(1)
+  async waitFor (status: STATUS, {
+    attempts = 100,
+    frequency = 500,
+    signal
+  }: {
+    attempts?: number
+    frequency?: number
+    signal?: AbortSignal
+  } = {}): Promise<Buffer> {
+    return await new Promise<Buffer>((resolve, reject) => {
+      const abortListener = (): void => {
+        signal?.removeEventListener('abort', abortListener)
+        reject(new Error('' + (signal?.reason ?? 'Aborted')))
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, frequency))
-    }
-    throw new Error('Device did not reach the expected status')
+      signal?.addEventListener('abort', abortListener)
+
+      let i = 0
+      setInterval(() => {
+        if (i >= attempts) reject(new Error('Device did not reach the expected status'))
+        if (signal?.aborted ?? false) reject(new Error('Aborted'))
+        this.exec(requestDataFor('POLL')).then((result) => {
+          if (!(result instanceof Buffer)) { reject(new Error('Unexpected response')); return }
+          if (result[0] === status) resolve(result.subarray(1))
+        }).catch(reject)
+        i++
+      }, frequency)
+
+      reject(new Error('Device did not reach the expected status'))
+    })
   }
 
   async reset (): Promise<void> {
