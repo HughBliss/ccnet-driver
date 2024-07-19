@@ -3,6 +3,7 @@ import { requestDataFor } from './commands'
 import { DEVICE_TYPE } from './devicesTypes'
 import { DeviceBusyError } from './errors'
 import { getCRC16 as requestSignature } from './helpers'
+import { STATUS } from './statuses'
 
 interface DeviceMeta {
   Part: string
@@ -63,89 +64,6 @@ export class CCNET implements Disposable {
     )
   }
 
-  async [Symbol.dispose] (): Promise<void> {
-    this.debug('Disconnecting from device...')
-    await this.serialPortClose()
-  }
-
-  debug (message: string): void {
-    if (this.debugMode) {
-      console.log(message)
-    }
-  }
-
-  async serialPortOpen (): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      this.serialPort.open((error) => {
-        if (error instanceof Error) {
-          reject(error)
-          return
-        }
-        resolve()
-      })
-    })
-  }
-
-  async serialPortClose (): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      this.serialPort.close((error) => {
-        if (error instanceof Error) {
-          reject(error)
-          return
-        }
-        resolve()
-      })
-    })
-  }
-
-  async serialPortWrite (data: Buffer): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      this.serialPort.write(data, (error) => {
-        if (error instanceof Error) {
-          reject(error)
-          return
-        }
-        resolve()
-      })
-    })
-  }
-
-  async serialPortRead (): Promise<Buffer> {
-    return await new Promise<Buffer>((resolve, reject) => {
-      let answer: Buffer | undefined
-      let length = 0
-      let timer: NodeJS.Timeout | null = null
-      const listenToAnswer = (data: Buffer): void => {
-        this.debug('Data received: ' + data.toString('hex'))
-        if (answer instanceof Buffer) {
-          answer = Buffer.from([...answer, ...data])
-        } else {
-          answer = data
-        }
-        this.debug('Answer: ' + answer.toString('hex'))
-        if (answer.length >= 3 && length === 0) {
-          length = answer[2]
-        }
-        this.debug('Answer length: ' + length)
-        if (length === answer.length) {
-          this.debug('Answer length reached')
-          this.answerParser.removeListener('data', listenToAnswer)
-          if (timer !== null) {
-            clearTimeout(timer)
-          }
-          this.debug('Resolving answer: ' + answer.toString('hex'))
-          resolve(answer)
-        }
-      }
-      this.answerParser.on('data', listenToAnswer)
-      timer = setTimeout(() => {
-        this.debug('Timeout reached')
-        this.answerParser.removeListener('data', listenToAnswer)
-        reject(new Error('Timeout reached'))
-      }, this.timeout)
-    })
-  }
-
   async connect (): Promise<void> {
     try {
       this.debug('Connecting to device...')
@@ -177,10 +95,21 @@ export class CCNET implements Disposable {
   }
 
   async waitForReboot (): Promise<void> {
-    for (let i = 0; i < 10; ++i) {
+    for (let i = 0; i < 100; ++i) {
       const result = await this.exec(requestDataFor('POLL'))
-      if (result?.compare(Buffer.from([0x19])) === 0) return
-      await new Promise<void>((resolve) => setTimeout(resolve, 100))
+      if (!(result instanceof Buffer)) throw new Error('Unexpected response')
+      switch (result[0]) {
+        case STATUS.UNIT_DISABLED:
+          this.debug('Device rebooted')
+          return
+        case STATUS.INITIALIZE:
+          this.debug('Device is initializing')
+          break
+        default:
+          this.debug('Unexpected status: ' + result[0].toString(16))
+          break
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 500))
     }
     throw new Error('Device did not reboot')
   }
@@ -229,6 +158,87 @@ export class CCNET implements Disposable {
       await this.serialPortWrite(ok)
     }
     return data
+  }
+
+  async serialPortOpen (): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      this.serialPort.open((error) => {
+        if (error instanceof Error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  async serialPortClose (): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      this.serialPort.close((error) => {
+        if (error instanceof Error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  async serialPortWrite (data: Buffer): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      this.serialPort.write(data, (error) => {
+        if (error instanceof Error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  async serialPortRead (): Promise<Buffer> {
+    return await new Promise<Buffer>((resolve, reject) => {
+      let answer: Buffer | undefined
+      let length = 0
+      let timer: NodeJS.Timeout | null = null
+      const listenToAnswer = (data: Buffer): void => {
+        if (answer instanceof Buffer) {
+          answer = Buffer.from([...answer, ...data])
+        } else {
+          answer = data
+        }
+        if (answer.length >= 3 && length === 0) {
+          length = answer[2]
+          this.debug('Answer length: ' + length)
+        }
+        if (length === answer.length) {
+          this.debug('Answer length reached')
+          this.answerParser.removeListener('data', listenToAnswer)
+          if (timer !== null) {
+            clearTimeout(timer)
+          }
+          this.debug('Resolving answer: ' + answer.toString('hex'))
+          resolve(answer)
+        }
+      }
+      this.answerParser.on('data', listenToAnswer)
+      timer = setTimeout(() => {
+        this.debug('Timeout reached')
+        this.answerParser.removeListener('data', listenToAnswer)
+        reject(new Error('Timeout reached'))
+      }, this.timeout)
+    })
+  }
+
+  debug (message: string): void {
+    if (this.debugMode) {
+      console.log(message)
+    }
+  }
+
+  async [Symbol.dispose] (): Promise<void> {
+    this.debug('Disconnecting from device...')
+    await this.serialPortClose()
   }
 
   // handleResponse (response: Buffer): void {
