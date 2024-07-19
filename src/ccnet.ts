@@ -142,8 +142,6 @@ export class CCNET implements Disposable {
         }).catch(reject)
         i++
       }, frequency)
-
-      reject(new Error('Device did not reach the expected status'))
     })
   }
 
