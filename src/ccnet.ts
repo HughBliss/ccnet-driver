@@ -1,7 +1,7 @@
 import { ByteLengthParser, SerialPort } from 'serialport'
 import { type COMMAND, COMMAND_HEX } from './commands'
 import { DEVICE_TYPE } from './devicesTypes'
-import { DeviceBusyError, DeviceIsOfflineError } from './errors'
+import { DeviceBusyError, DeviceIsOfflineError, OperationRejectedError } from './errors'
 import { getCRC16 as requestSignature } from './helpers'
 import { STATUS } from './statuses'
 
@@ -65,28 +65,17 @@ export class CCNET implements Disposable {
   }
 
   async connect (): Promise<void> {
-    try {
-      this.debug('Connecting to device...')
-      await this.serialPortOpen()
-      this.debug('Connected!')
-      this.isConnect = true
-      await this.reset()
-      await this.waitForReboot()
-      const meta = await this.identify()
-      this.debug(`Device identified: ${JSON.stringify(meta)}`)
-    } catch (error) {
-      if (error instanceof Error) {
-        this.debug('error while connecting to device: ' + error.message)
-        throw new Error('error while connecting to device: ' + error.message)
-      }
-      this.debug(JSON.stringify(error))
-    }
+    this.debug('Connecting to device...')
+    await this.serialPortOpen()
+    this.debug('Connected!')
+    this.isConnect = true
+    await this.reset()
+    await this.waitForReboot()
+    // const meta = await this.identify()
+    // this.debug(`Device identified: ${JSON.stringify(meta)}`)
   }
 
-  async escrow ({
-    billsToEnable = [],
-    signal
-  }: {
+  async escrow ({ billsToEnable = [], signal }: {
     billsToEnable?: number[]
     signal?: AbortSignal
   } = {}): Promise<number> {
@@ -131,34 +120,28 @@ export class CCNET implements Disposable {
         reject(new Error('' + (signal?.reason ?? 'Aborted')))
       }
       signal?.addEventListener('abort', abortListener)
-
+      let timer: NodeJS.Timeout | null = null
+      const rejectAndClear = (error: Error): void => {
+        if (timer !== null) { clearInterval(timer) }
+        signal?.removeEventListener('abort', abortListener)
+        reject(error)
+      }
       let i = 0
-      const timer = setInterval(() => {
-        if (i >= attempts) {
-          clearInterval(timer)
-          reject(new Error('Device did not reach the expected status'))
-        }
-        if (signal?.aborted ?? false) {
-          clearInterval(timer)
-          reject(new Error('Aborted'))
-        }
+      timer = setInterval(() => {
+        if (i >= attempts) { rejectAndClear(new Error('Device did not reach the expected status')); return }
+        if (signal?.aborted ?? false) { rejectAndClear(new Error('Aborted')); return }
         this.exec(this.requestDataFor('POLL')).then((result) => {
-          if (!(result instanceof Buffer)) {
-            clearInterval(timer)
-            reject(new Error('Unexpected response')); return
-          }
+          if (!(result instanceof Buffer)) { rejectAndClear(new Error('Unexpected response')); return }
+          if (result[0] === STATUS.REJECTING) { rejectAndClear(new OperationRejectedError(result[1])); return }
           if (result[0] === status) {
-            clearInterval(timer)
+            if (timer !== null) clearInterval(timer)
+            signal?.removeEventListener('abort', abortListener)
             resolve(result.subarray(1))
           }
         }).catch((err) => {
           if (err instanceof DeviceBusyError) return
-          if (!(err instanceof Error)) {
-            clearInterval(timer)
-            reject(new Error('Unexpected error')); return
-          }
-          clearInterval(timer)
-          reject(err)
+          if (!(err instanceof Error)) { rejectAndClear(new Error('Unexpected error')); return }
+          rejectAndClear(err)
         })
         i++
       }, frequency)
@@ -214,10 +197,7 @@ export class CCNET implements Disposable {
   async serialPortOpen (): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       this.serialPort.open((error) => {
-        if (error instanceof Error) {
-          reject(error)
-          return
-        }
+        if (error instanceof Error) { reject(error); return }
         resolve()
       })
     })
@@ -226,10 +206,7 @@ export class CCNET implements Disposable {
   async serialPortClose (): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       this.serialPort.close((error) => {
-        if (error instanceof Error) {
-          reject(error)
-          return
-        }
+        if (error instanceof Error) { reject(error); return }
         resolve()
       })
     })
@@ -238,10 +215,7 @@ export class CCNET implements Disposable {
   async serialPortWrite (data: Buffer): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       this.serialPort.write(data, (error) => {
-        if (error instanceof Error) {
-          reject(error)
-          return
-        }
+        if (error instanceof Error) { reject(error); return }
         resolve()
       })
     })
@@ -319,317 +293,4 @@ export class CCNET implements Disposable {
     this.debug(`Executing command: ${commandName}` + ((data != null) ? ` with data: ${data.toString('hex')}` : ''))
     return Buffer.from([COMMAND_HEX[commandName], ...(data ?? [])])
   }
-
-  // handleResponse (response: Buffer): void {
-  //   this.debug(response.toString())
-  //   this.debug('Sync: ' + this.sync)
-  //   this.debug('Device: ' + this.device.toString(16))
-
-  //   if (response[0] !== this.sync || response[1] !== this.device) {
-  //     throw new Error('Wrong response target')
-  //   }
-
-  // }
-
-  // /**
-  //    * Connect to device
-  //    * @param cb {Function} Callback function
-  //    */
-  // connect (cb : () =>void) {
-  //   const self = this
-
-  //   async.waterfall([
-
-  //     // Connect to device
-  //     function (callback) {
-  //       debug('Connect to device...')
-  //       self.serialPort.open(callback)
-  //     },
-
-  //     // Reset
-  //     function (callback) {
-  //       debug('Connected!')
-  //       self.isConnect = true
-  //       self.execute('RESET', null, callback)
-  //     },
-
-  //     // Waiting "Unit disabled" status
-  //     function (r, callback) {
-  //       var timer = setInterval(function () {
-  //         debug('Timer1')
-  //         self.execute('POLL', null, function (err, data) {
-  //           switch (data.toString('hex')) {
-  //             // Device rebooted
-  //             case '19':
-  //               clearInterval(timer)
-  //               callback()
-  //               break
-  //           }
-  //         })
-  //       }, 100)
-  //     },
-
-  //     // Get status
-  //     function (callback) {
-  //       // @todo: get status
-  //       callback()
-  //     },
-
-  //     // Get Bill Table
-  //     function (callback) {
-  //       // @todo: get bill table
-  //       callback()
-  //     },
-
-  //     // Set security
-  //     function (callback) {
-  //       // @todo: set security
-  //       callback()
-  //     },
-
-  //     // Identification
-  //     function (callback) {
-  //       self.execute('IDENTIFICATION', null, callback)
-  //     },
-
-  //     function (data) {
-  //       cb(null, data)
-  //     }
-
-  //   ], function (err) {
-  //     if (err) {
-  //       return cb(err)
-  //     }
-  //   })
-  // }
-  //   /**
-  //      * Disconnect from device
-  //      * @param cb {Function} callback function
-  //      */
-  //   close (cb) {
-  //     clearInterval(this.globalTimer)
-  //     this.serialPort.close(cb)
-  //   }
-
-  //   /**
-  //      * Send command to device and prepare the answer
-  //      * @param command {String} Command name
-  //      * @param data {Object} Command data
-  //      * @param cb {Function} Callback function
-  //      */
-  //   execute (command, data, cb) {
-  //     debug('[Execute] Command: ' + command + ' data: ' + data)
-  //     if (this.isConnect == false) {
-  //       return cb(new Error('Device is not connected!'))
-  //     }
-
-  //     this.command = commands[command]
-
-  //     if (this.command == undefined) {
-  //       return cb(new Error('Command not found: ' + command))
-  //     }
-
-  //     if (this.busy) {
-  //       return cb(new Error('Device is busy'))
-  //     }
-
-  //     this._sendCommand(this.command.request(data), cb)
-  //   }
-  //   /**
-  //      * Escrow banknotes
-  //      * @param a {Array} hex-numberic array
-  //      * @param b {Function} callback function
-  //      */
-  //   escrow (a, b) {
-  //     let billsEnable, cb, billTable
-
-  //     switch (typeof a) {
-  //       case 'array':
-  //         billsEnable = a
-  //         cb = b
-  //         break
-
-  //       case 'function':
-  //         cb = a
-  //         billsEnable = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
-  //         break
-
-  //       default:
-  //         throw new Error('Undefined parameters')
-  //     }
-
-  //     const self = this
-
-  //     async.waterfall([
-
-  //       function (callback) {
-  //         self.execute('GET BILL TABLE', null, callback)
-  //       },
-
-  //       function (btbl, callback) {
-  //         billTable = btbl
-  //         self.execute('ENABLE BILL TYPES', billsEnable, callback)
-  //       },
-
-  //       function () {
-  //         let state
-
-  //         this.globalTimer = setInterval(function () {
-  //           self.execute('POLL', null, function (err, data) {
-  //             if (err) {
-  //               debug(err)
-  //               return
-  //             }
-
-  //             // Handle new state
-  //             const newState = data[0].toString(16)
-  //             if (state != newState) {
-  //               state = newState
-
-  //               if (data[0].toString(16) == '80') {
-  //                 cb.call(self, null, billTable[data[1]])
-  //               }
-  //             }
-  //           })
-  //         }, 100)
-  //       }
-
-  //     ], function (err) {
-  //       return cb(err)
-  //     })
-  //     }
-
-  //   /**
-  //      * Stack banknote
-  //      * @param cb
-  //      */
-  //   stack (cb) {
-  //     this.execute('STACK', null, cb)
-  //   }
-
-  //   /**
-  //      * Return banknote
-  //      * @param cb
-  //      */
-  //   retrieve:  (cb) {
-  //     this.execute('RETURN', null, cb)
-  //   }
-
-  //   /**
-  //      * End of stack
-  //      * @param cb
-  //      */
-  //   end (cb) {
-  //     clearTimeout(this.globalTimer)
-  //     this.execute('ENABLE BILL TYPES', [0x00, 0x00, 0x00, 0x00, 0x00, 0x00], cb)
-  //   }
-
-  //   // Helper for send and receive commands
-  //   _sendCommand:  (c, callback) {
-  //     this.busy = true
-  //     const self = this
-
-  //     // Clear old listener
-  //     if (this.globalListener && typeof this.globalListener === 'function') {
-  //       this.serialPort.removeListener('data', this.globalListener)
-  //       this.globalListener = false
-  //     }
-
-  //     let cmd = Buffer.concat([new Buffer(
-  //       [
-  //         this.sync, // SYNC
-  //         this.device // ADR
-  //       ]
-  //     ), new Buffer([(c.length + 5)]), c])
-
-  //     cmd = Buffer.concat([cmd, getCRC16(cmd)])
-
-  //     this.serialPort.write(cmd, function (err) {
-  //       if (err) {
-  //         self.busy = false
-  //         return callback(err)
-  //       }
-  //     })
-
-  //     let b = false
-  //     let ln = 0
-
-  //     this.globalListener = function (data) {
-  //       if (b) {
-  //         b = Buffer.concat([b, data])
-  //       } else {
-  //         b = data
-  //       }
-
-  //       // Set response length
-  //       if (b.length >= 3 && ln == 0) {
-  //         ln = parseInt(b[2].toString())
-  //       }
-
-  //       if (ln == b.length) {
-  //         self.serialPort.removeListener('data', self.globalListener)
-  //         self.globalListener = false
-  //         self.busy = false
-  //         return self._checkResponse(b, callback)
-  //       }
-  //     }
-
-  //     this.serialPort.on('data', this.globalListener)
-  //   }
-
-  //   // Check response
-  //   _checkResponse (response, callback) {
-  //     const self = this
-
-  //     // Check response address
-  //     debug(response)
-  //     debug('Sync: ' + this.sync)
-  //     debug('Device: ' + this.device.toString(16))
-  //     if (response[0] != this.sync || response[1] != this.device) {
-  //       return callback(new Error('Wrong response target'))
-  //     }
-
-  //     // Check CRC
-  //     const ln = response.length
-  //     const checkCRC = response.slice(ln - 2, ln)
-  //     const responseCRCslice = response.slice(0, ln - 2)
-  //     const data = response.slice(3, ln - 2)
-
-  //     if (checkCRC.toString() != (getCRC16(responseCRCslice)).toString()) {
-  //       return callback(new Error('Wrong response command hash'))
-  //     } else {
-  //       const cmd = new Buffer([0x02, self.device, 0x06, 0x00])
-  //       const c = Buffer.concat([cmd, getCRC16(cmd)])
-
-  //       self.serialPort.write(c, function (err) {
-  //         if (typeof callback === 'function') {
-  //           return callback.call(self, err, self.command.response(data))
-  //         }
-  //       })
-  //     }
-  // }
-
-  // }
-
-  // // Helper for calculation CRC16 check sum
-  // function getCRC16 (bufData) {
-  //   const POLYNOMIAL = 0x08408
-  //   const sizeData = bufData.length
-  //   let CRC, i, j
-  //   CRC = 0
-  //   for (i = 0; i < sizeData; i++) {
-  //     CRC ^= bufData[i]
-  //     for (j = 0; j < 8; j++) {
-  //       if (CRC & 0x0001) {
-  //         CRC >>= 1
-  //         CRC ^= POLYNOMIAL
-  //       } else CRC >>= 1
-  //     }
-  //   }
-
-  //   const buf =  Buffer.from([2])
-  //   buf.writeUInt16BE(CRC, 0)
-  //   CRC = buf
-
-//   return Array.prototype.reverse.call(CRC)
 }
