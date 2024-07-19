@@ -186,9 +186,9 @@ export class CCNET implements Disposable {
     if (signature.compare(requestSignature(answerWithoutSignature)) !== 0) {
       throw new Error('Wrong response command hash')
     } else {
-      let ok = Buffer.from([this.sync, this.device, 0x06, 0x00])
-      ok = Buffer.from([...ok, ...requestSignature(ok)])
-      await this.serialPortWrite(ok)
+      // let ok = Buffer.from([this.sync, this.device, 0x06, 0x00])
+      // ok = Buffer.from([...ok, ...requestSignature(ok)])
+      // await this.serialPortWrite(ok)
     }
     return data
   }
