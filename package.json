@@ -1,14 +1,12 @@
 {
-  "name": "ccnet-driver",
-  "version": "0.0.1",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "example": "ts-node example/example.ts",
-    "lint": "eslint ./src --fix"
-  },
   "author": "",
-  "license": "ISC",
+  "dependencies": {
+    "@serialport/bindings-cpp": "^12.0.1",
+    "serialport": "^12.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  },
+  "description": "",
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.16.1",
     "@typescript-eslint/utils": "^7.16.1",
@@ -18,12 +16,21 @@
     "eslint-plugin-n": "^15.7.0",
     "eslint-plugin-promise": "^6.4.0",
     "globals": "^15.8.0",
+    "tsup": "^8.2.0",
     "typescript-eslint": "^7.16.1"
   },
-  "dependencies": {
-    "@serialport/bindings-cpp": "^12.0.1",
-    "serialport": "^12.0.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.5.3"
-  }
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "name": "ccnet-driver",
+  "scripts": {
+    "build": "tsup",
+    "example": "ts-node example/example.ts",
+    "lint": "eslint ./src --fix"
+  },
+  "types": "./dist/index.d.ts",
+  "version": "0.0.1"
 }
