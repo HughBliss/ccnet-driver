@@ -10,8 +10,11 @@ import { CCNET, DEVICE_TYPE } from '../src'
 
   await ccnet.connect()
 
-  //   const meta = await ccnet.identify()
+  const meta = await ccnet.identify()
+  console.log({ meta })
 
-//   console.log(meta)
+  const result = await ccnet.escrow()
+
+  console.log({ result })
 })().then(() => { console.log('Done') })
   .catch(console.error)
