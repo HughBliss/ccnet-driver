@@ -1,5 +1,5 @@
 import { ByteLengthParser, SerialPort } from 'serialport'
-import { requestDataFor } from './commands'
+import { type COMMAND, COMMAND_HEX } from './commands'
 import { DEVICE_TYPE } from './devicesTypes'
 import { DeviceBusyError, DeviceIsOfflineError } from './errors'
 import { getCRC16 as requestSignature } from './helpers'
@@ -70,12 +70,10 @@ export class CCNET implements Disposable {
       await this.serialPortOpen()
       this.debug('Connected!')
       this.isConnect = true
-      this.debug('Reseting device...')
       await this.reset()
       await this.waitForReboot()
-      this.debug('Device reseted!')
       const meta = await this.identify()
-      this.debug('Device identified!\n\tPart: ' + meta.Part + '\n\tSerial: ' + meta.Serial + '\n\tAsset: ' + meta.Asset)
+      this.debug(`Device identified: ${JSON.stringify(meta)}`)
     } catch (error) {
       if (error instanceof Error) {
         this.debug('error while connecting to device: ' + error.message)
@@ -95,18 +93,18 @@ export class CCNET implements Disposable {
     if (billsToEnable.length === 0) {
       billsToEnable = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF] // Enable all bills
     }
-    const billTable = await this.exec(requestDataFor('GET_BILL_TABLE'))
+    const billTable = await this.exec(this.requestDataFor('GET_BILL_TABLE'))
     if (!(billTable instanceof Buffer)) throw new Error('error while getting bill table')
     Object.entries(this.parseBillTable(billTable)).forEach(([key, value]) => {
       this.debug(`Bill type ${key}: ${value}`)
     })
-    await this.exec(requestDataFor('ENABLE_BILL_TYPES', Buffer.from(billsToEnable)))
+    await this.exec(this.requestDataFor('ENABLE_BILL_TYPES', Buffer.from(billsToEnable)))
     const [billPosition] = await this.waitFor(STATUS.ESCROW_POSITION, { signal, attempts: 500, frequency: 200 }) // 500 attempts * 200ms = 100s = 1m40s
     return billTable[billPosition]
   }
 
   async identify (): Promise<DeviceMeta > {
-    const buffer = await this.exec(requestDataFor('IDENTIFICATION'))
+    const buffer = await this.exec(this.requestDataFor('IDENTIFICATION'))
     if (!(buffer instanceof Buffer)) throw new Error('error while identifying device')
     const part = buffer.subarray(0.15).toString().trim()
     const serial = buffer.subarray(15, 27).toString().trim()
@@ -138,7 +136,7 @@ export class CCNET implements Disposable {
       setInterval(() => {
         if (i >= attempts) reject(new Error('Device did not reach the expected status'))
         if (signal?.aborted ?? false) reject(new Error('Aborted'))
-        this.exec(requestDataFor('POLL')).then((result) => {
+        this.exec(this.requestDataFor('POLL')).then((result) => {
           if (!(result instanceof Buffer)) { reject(new Error('Unexpected response')); return }
           if (result[0] === status) resolve(result.subarray(1))
         }).catch((err) => {
@@ -152,7 +150,7 @@ export class CCNET implements Disposable {
   }
 
   async reset (): Promise<void> {
-    await this.exec(requestDataFor('RESET'))
+    await this.exec(this.requestDataFor('RESET'))
   }
 
   async exec (request: Buffer): Promise<Buffer | undefined> {
@@ -299,6 +297,11 @@ export class CCNET implements Disposable {
       billTable[i] = `${denominationString} ${country}`
     }
     return billTable
+  }
+
+  requestDataFor (commandName: COMMAND, data?: Buffer): Buffer {
+    this.debug(`Executing command: ${commandName}` + ((data != null) ? ` with data: ${data.toString('hex')}` : ''))
+    return Buffer.from([COMMAND_HEX[commandName], ...(data ?? [])])
   }
 
   // handleResponse (response: Buffer): void {

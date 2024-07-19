@@ -25,11 +25,6 @@ export interface CommandIO {
   response: (data: Buffer) => unknown
 }
 
-export const requestDataFor = (commandName: COMMAND, data?: Buffer): Buffer => {
-  const b = Buffer.from([COMMAND_HEX[commandName], ...(data ?? [])])
-  return b
-}
-
 export const commands: { [key in COMMAND]: CommandIO } = {
   GET_BILL_TABLE: {
     request: () => Buffer.from([COMMAND_HEX.GET_BILL_TABLE]),
