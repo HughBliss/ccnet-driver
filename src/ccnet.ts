@@ -133,15 +133,31 @@ export class CCNET implements Disposable {
       signal?.addEventListener('abort', abortListener)
 
       let i = 0
-      setInterval(() => {
-        if (i >= attempts) reject(new Error('Device did not reach the expected status'))
-        if (signal?.aborted ?? false) reject(new Error('Aborted'))
+      const timer = setInterval(() => {
+        if (i >= attempts) {
+          clearInterval(timer)
+          reject(new Error('Device did not reach the expected status'))
+        }
+        if (signal?.aborted ?? false) {
+          clearInterval(timer)
+          reject(new Error('Aborted'))
+        }
         this.exec(this.requestDataFor('POLL')).then((result) => {
-          if (!(result instanceof Buffer)) { reject(new Error('Unexpected response')); return }
-          if (result[0] === status) resolve(result.subarray(1))
+          if (!(result instanceof Buffer)) {
+            clearInterval(timer)
+            reject(new Error('Unexpected response')); return
+          }
+          if (result[0] === status) {
+            clearInterval(timer)
+            resolve(result.subarray(1))
+          }
         }).catch((err) => {
           if (err instanceof DeviceBusyError) return
-          if (!(err instanceof Error)) { reject(new Error('Unexpected error')); return }
+          if (!(err instanceof Error)) {
+            clearInterval(timer)
+            reject(new Error('Unexpected error')); return
+          }
+          clearInterval(timer)
           reject(err)
         })
         i++
