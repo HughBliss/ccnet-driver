@@ -1,7 +1,7 @@
 import { ByteLengthParser, SerialPort } from 'serialport'
 import { requestDataFor } from './commands'
 import { DEVICE_TYPE } from './devicesTypes'
-import { DeviceBusyError } from './errors'
+import { DeviceBusyError, DeviceIsOfflineError } from './errors'
 import { getCRC16 as requestSignature } from './helpers'
 import { STATUS } from './statuses'
 
@@ -141,7 +141,11 @@ export class CCNET implements Disposable {
         this.exec(requestDataFor('POLL')).then((result) => {
           if (!(result instanceof Buffer)) { reject(new Error('Unexpected response')); return }
           if (result[0] === status) resolve(result.subarray(1))
-        }).catch(reject)
+        }).catch((err) => {
+          if (err instanceof DeviceBusyError) return
+          if (!(err instanceof Error)) { reject(new Error('Unexpected error')); return }
+          reject(err)
+        })
         i++
       }, frequency)
     })
@@ -152,8 +156,8 @@ export class CCNET implements Disposable {
   }
 
   async exec (request: Buffer): Promise<Buffer | undefined> {
-    if (!this.isConnect) throw new Error('Device is not connected!')
-    if (this.busy) throw new DeviceBusyError('Device is busy')
+    if (!this.isConnect) throw new DeviceIsOfflineError()
+    if (this.busy) throw new DeviceBusyError()
     this.debug('Sending request: ' + request.toString('hex'))
     request = Buffer.from([this.sync, this.device, request.length + 5, ...request])
     request = Buffer.from([...request, ...requestSignature(request)])
