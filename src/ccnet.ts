@@ -93,11 +93,13 @@ export class CCNET implements Disposable {
     signal?: AbortSignal
   } = {}): Promise<number> {
     if (billsToEnable.length === 0) {
-      billsToEnable = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+      billsToEnable = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF] // Enable all bills
     }
     const billTable = await this.exec(requestDataFor('GET_BILL_TABLE'))
     if (!(billTable instanceof Buffer)) throw new Error('error while getting bill table')
-    this.debug(billTable.toString())
+    Object.entries(this.parseBillTable(billTable)).forEach(([key, value]) => {
+      this.debug(`Bill type ${key}: ${value}`)
+    })
     await this.exec(requestDataFor('ENABLE_BILL_TYPES', Buffer.from(billsToEnable)))
     const [billPosition] = await this.waitFor(STATUS.ESCROW_POSITION, { signal, attempts: 500, frequency: 200 }) // 500 attempts * 200ms = 100s = 1m40s
     return billTable[billPosition]
@@ -270,6 +272,29 @@ export class CCNET implements Disposable {
   async [Symbol.dispose] (): Promise<void> {
     this.debug('Disconnecting from device...')
     await this.serialPortClose()
+  }
+
+  // The 120 - byte string consists from 24 five-byte words.
+  // Byte 1 of word – most significant digit(s) of the denomination.
+  // Bytes 2-4 of word – country code in ASCII characters.
+  // Byte 5 of word – this byte used to determine decimal placement or proceeding zeros. If bit D7 is 0, the
+  // bits D0-D6 indicate the number of proceeding zeros. If bit D7 is 1, the bits D0-D6 indicates the decimal
+  // point position starting from the right and moving to the left.
+  // A five-byte position in the 120-bytes string indicates bill type description for the particular bill type. For
+  // example, first five byte correspond bill type=0, second five byte correspond bill type=1 and so on.
+  parseBillTable (buffer: Buffer): Record<number, string> {
+    const billTable: Record<number, string> = {}
+    for (let i = 0; i < 24; i++) {
+      const denomination = buffer[i * 5]
+      const country = buffer.subarray(i * 5 + 1, i * 5 + 4).toString()
+      const decimal = buffer[i * 5 + 4]
+      const zeros = decimal & 0b01111111
+      const decimalPosition = decimal >> 7
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+      const denominationString = decimalPosition ? '0.' + '0'.repeat(zeros) + denomination : denomination + '.0'.repeat(zeros)
+      billTable[i] = `${denominationString} ${country}`
+    }
+    return billTable
   }
 
   // handleResponse (response: Buffer): void {
