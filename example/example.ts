@@ -13,8 +13,16 @@ import { CCNET, DEVICE_TYPE } from '../src'
   const meta = await ccnet.identify()
   console.log({ meta })
 
-  const result = await ccnet.escrow()
+  const testBillToReturn = await ccnet.escrow()
 
-  console.log({ result })
+  console.log({ testBillToReturn })
+
+  await ccnet.return()
+
+  const testBillToStack = await ccnet.escrow()
+
+  console.log({ testBillToStack })
+
+  await ccnet.stack()
 })().then(() => { console.log('Done') })
   .catch(console.error)

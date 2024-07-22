@@ -10,7 +10,7 @@ def handle_input(master_fd):
         if data:
             # print hex
             print("received: "+"".join(f"{b:02x} " for b in data))
-            time.sleep(1)  # Эмулируем задержку
+            time.sleep(0.1)
             os.write(master_fd,  data)
 
 

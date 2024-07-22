@@ -4,8 +4,7 @@ import { DEVICE_TYPE } from './devicesTypes'
 import { DeviceBusyError, DeviceIsOfflineError, OperationRejectedError } from './errors'
 import { getCRC16 as requestSignature } from './helpers'
 import { STATUS } from './statuses'
-
-interface DeviceMeta {
+export interface DeviceMeta {
   Part: string
   Serial: string
   Asset: string
@@ -75,21 +74,33 @@ export class CCNET implements Disposable {
     // this.debug(`Device identified: ${JSON.stringify(meta)}`)
   }
 
+  async stack (): Promise<void> {
+    await this.exec(this.requestDataFor('STACK'))
+    await this.waitFor(STATUS.BILL_STACKED)
+  }
+
+  async return (): Promise<void> {
+    await this.exec(this.requestDataFor('RETURN'))
+    await this.waitFor(STATUS.BILL_RETURNED)
+  }
+
   async escrow ({ billsToEnable = [], signal }: {
     billsToEnable?: number[]
     signal?: AbortSignal
-  } = {}): Promise<number> {
+  } = {}): Promise<Bill> {
     if (billsToEnable.length === 0) {
       billsToEnable = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF] // Enable all bills
     }
-    const billTable = await this.exec(this.requestDataFor('GET_BILL_TABLE'))
-    if (!(billTable instanceof Buffer)) throw new Error('error while getting bill table')
-    Object.entries(this.parseBillTable(billTable)).forEach(([key, value]) => {
-      this.debug(`Bill type ${key}: ${value}`)
-    })
+    const billTableBuffer = await this.exec(this.requestDataFor('GET_BILL_TABLE'))
+    if (!(billTableBuffer instanceof Buffer)) throw new Error('error while getting bill table')
+
+    const billTable = this.parseBillTable(billTableBuffer)
+
+    if (this.debugMode) billTable.debug()
+
     await this.exec(this.requestDataFor('ENABLE_BILL_TYPES', Buffer.from(billsToEnable)))
     const [billPosition] = await this.waitFor(STATUS.ESCROW_POSITION, { signal, attempts: 500, frequency: 200 }) // 500 attempts * 200ms = 100s = 1m40s
-    return billTable[billPosition]
+    return billTable.getBillByCode(billPosition) ?? { amount: 0, code: 0, countyCode: COUNTRY.RUS }
   }
 
   async identify (): Promise<DeviceMeta > {
@@ -261,6 +272,10 @@ export class CCNET implements Disposable {
     }
   }
 
+  async dispose (): Promise<void> {
+    await this[Symbol.dispose]()
+  }
+
   async [Symbol.dispose] (): Promise<void> {
     this.debug('Disconnecting from device...')
     await this.serialPortClose()
@@ -274,8 +289,8 @@ export class CCNET implements Disposable {
   // point position starting from the right and moving to the left.
   // A five-byte position in the 120-bytes string indicates bill type description for the particular bill type. For
   // example, first five byte correspond bill type=0, second five byte correspond bill type=1 and so on.
-  parseBillTable (buffer: Buffer): Record<number, string> {
-    const billTable: Record<number, string> = {}
+  parseBillTable (buffer: Buffer): BillTable {
+    const billTable: Record<number, Bill> = {}
     for (let i = 0; i < 24; i++) {
       const denomination = buffer[i * 5]
       const country = buffer.subarray(i * 5 + 1, i * 5 + 4).toString()
@@ -283,14 +298,45 @@ export class CCNET implements Disposable {
       const zeros = decimal & 0b01111111
       const decimalPosition = decimal >> 7
       // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-      const denominationString = decimalPosition ? '0.' + '0'.repeat(zeros) + denomination : denomination + '.0'.repeat(zeros)
-      billTable[i] = `${denominationString} ${country}`
+      const denominationString = decimalPosition ? '0' + '0'.repeat(zeros) + denomination : denomination + '0'.repeat(zeros)
+      billTable[i] = {
+        amount: parseInt(denominationString),
+        code: i,
+        countyCode: country as COUNTRY
+      }
     }
-    return billTable
+    return new BillTable(billTable)
   }
 
   requestDataFor (commandName: COMMAND, data?: Buffer): Buffer {
     this.debug(`Executing command: ${commandName}` + ((data != null) ? ` with data: ${data.toString('hex')}` : ''))
     return Buffer.from([COMMAND_HEX[commandName], ...(data ?? [])])
+  }
+}
+
+export enum COUNTRY {
+  RUS = 'RUS',
+}
+
+export interface Bill {
+  amount: number
+  code: number
+  countyCode: COUNTRY
+}
+
+export class BillTable {
+  private readonly table: Record<number, Bill>
+  constructor (table: Record<number, Bill>) {
+    this.table = table
+  }
+
+  getBillByCode (code: number): Bill | undefined {
+    return this.table[code]
+  }
+
+  debug (): void {
+    Object.entries(this.table).forEach(([key, value]) => {
+      console.log(`Bill type ${key}: ${value.amount} ${value.countyCode}`)
+    })
   }
 }
