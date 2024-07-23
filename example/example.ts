@@ -17,12 +17,12 @@ import { CCNET, DEVICE_TYPE } from '../src'
 
   console.log({ testBillToReturn })
 
-  await ccnet.return()
+  // await ccnet.return()
+  await ccnet.stack()
 
   const testBillToStack = await ccnet.escrow()
 
   console.log({ testBillToStack })
-
   await ccnet.stack()
 })().then(() => { console.log('Done') })
   .catch(console.error)
