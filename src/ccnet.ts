@@ -202,11 +202,16 @@ export class CCNET implements Disposable {
     const answerWithoutSignature = answer.subarray(0, ln - 2)
     const data = answer.subarray(3, ln - 2)
     if (signature.compare(requestSignature(answerWithoutSignature)) !== 0) {
+      let nak = Buffer.from([this.sync, this.device, 0x05, 0xff])
+      nak = Buffer.from([...nak, ...requestSignature(nak)])
+      await this.serialPortWrite(nak)
+      this.debug('NAK sent')
       throw new Error('Wrong response command hash')
     } else {
-      // let ok = Buffer.from([this.sync, this.device, 0x06, 0x00])
-      // ok = Buffer.from([...ok, ...requestSignature(ok)])
-      // await this.serialPortWrite(ok)
+      let ack = Buffer.from([this.sync, this.device, 0x06, 0x00])
+      ack = Buffer.from([...ack, ...requestSignature(ack)])
+      await this.serialPortWrite(ack)
+      this.debug('ACK sent')
     }
     return data
   }
