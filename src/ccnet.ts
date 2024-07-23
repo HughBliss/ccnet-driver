@@ -19,6 +19,7 @@ export class CCNET implements Disposable {
   private readonly debugMode: boolean
   private readonly answerParser: ByteLengthParser
   private readonly timeout: number
+  billTable: BillTable | undefined
 
   constructor ({ path, deviceType, timeout, isDebugMode = false }: {
     path: string
@@ -70,18 +71,29 @@ export class CCNET implements Disposable {
     this.isConnect = true
     await this.reset()
     await this.waitForReboot()
-    // const meta = await this.identify()
-    // this.debug(`Device identified: ${JSON.stringify(meta)}`)
   }
 
-  async stack (): Promise<void> {
+  async stack (): Promise<Bill> {
     await this.exec(this.requestDataFor('STACK'))
-    await this.waitFor(STATUS.BILL_STACKED)
+    const billBuffer = await this.waitFor(STATUS.BILL_STACKED)
+    const billCode = billBuffer.length === 1 ? billBuffer[0] : 0
+    return this.billTable?.getBillByCode(billCode) ?? { amount: 0, code: 0, countyCode: COUNTRY.RUS }
   }
 
-  async return (): Promise<void> {
+  async return (): Promise<Bill> {
     await this.exec(this.requestDataFor('RETURN'))
-    await this.waitFor(STATUS.BILL_RETURNED)
+    const billBuffer = await this.waitFor(STATUS.BILL_RETURNED)
+    const billCode = billBuffer.length === 1 ? billBuffer[0] : 0
+    return this.billTable?.getBillByCode(billCode) ?? { amount: 0, code: 0, countyCode: COUNTRY.RUS }
+  }
+
+  async getBillTable (): Promise<BillTable> {
+    const billTableBuffer = await this.exec(this.requestDataFor('GET_BILL_TABLE'))
+    if (!(billTableBuffer instanceof Buffer)) throw new Error('error while getting bill table: Empty response')
+    if (billTableBuffer.length !== 120) throw new Error('error while getting bill table: Invalid bill table length')
+    this.billTable = this.parseBillTable(billTableBuffer)
+    if (this.debugMode) this.billTable.debug()
+    return this.billTable
   }
 
   async escrow ({ billsToEnable = [], signal }: {
@@ -91,16 +103,10 @@ export class CCNET implements Disposable {
     if (billsToEnable.length === 0) {
       billsToEnable = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF] // Enable all bills
     }
-    const billTableBuffer = await this.exec(this.requestDataFor('GET_BILL_TABLE'))
-    if (!(billTableBuffer instanceof Buffer)) throw new Error('error while getting bill table')
-
-    const billTable = this.parseBillTable(billTableBuffer)
-
-    if (this.debugMode) billTable.debug()
-
+    if (this.billTable === undefined) await this.getBillTable()
     await this.exec(this.requestDataFor('ENABLE_BILL_TYPES', Buffer.from(billsToEnable)))
     const [billPosition] = await this.waitFor(STATUS.ESCROW_POSITION, { signal, attempts: 500, frequency: 200 }) // 500 attempts * 200ms = 100s = 1m40s
-    return billTable.getBillByCode(billPosition) ?? { amount: 0, code: 0, countyCode: COUNTRY.RUS }
+    return this.billTable?.getBillByCode(billPosition) ?? { amount: 0, code: 0, countyCode: COUNTRY.RUS }
   }
 
   async identify (): Promise<DeviceMeta > {
